@@ -145,8 +145,17 @@ function IconWrap({ icon: Icon, size, color, strokeWidth }) {
   useEffect(() => {
     if (ref.current) {
       ref.current.innerHTML = "";
-      const svg = Icon.toSvg({ width: size, height: size, color, "stroke-width": strokeWidth || 2 });
-      ref.current.innerHTML = svg;
+      try {
+        const svgEl = lucide.createElement(Icon, {
+          width: size,
+          height: size,
+          color: color,
+          "stroke-width": strokeWidth || 2,
+        });
+        ref.current.appendChild(svgEl);
+      } catch (e) {
+        // fail silently if an icon mismatches; layout still works without it
+      }
     }
   }, [Icon, size, color, strokeWidth]);
   return <span ref={ref} style={{ display: "inline-flex", verticalAlign: "middle" }} />;
