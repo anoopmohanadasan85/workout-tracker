@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<meta name="theme-color" content="#1C1B1A" />
+<title>Focus &amp; Form — Workout Tracker</title>
+
+<!-- PWA -->
+<link rel="manifest" href="manifest.json" />
+<link rel="apple-touch-icon" href="icons/icon-192.png" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Focus & Form" />
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: #1C1B1A; }
+  body { font-family: 'Inter', -apple-system, sans-serif; color: #EDEAE3; -webkit-tap-highlight-color: transparent; }
+  input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.8); }
+  ::-webkit-scrollbar { display: none; }
+  button { font-family: inherit; }
+  input:focus, button:focus { outline: 2px solid #D9A441; outline-offset: 1px; }
+</style>
+
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://unpkg.com/lucide@0.263.1/dist/umd/lucide.js"></script>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useCallback, useMemo } = React;
+
+// ---------- Local storage adapter (mirrors the window.storage API shape) ----------
+const storage = {
+  get: async (key) => {
+    const raw = localStorage.getItem(key);
+    if (raw === null) return null;
+    return { key, value: raw };
+  },
+  set: async (key, value) => {
+    try {
+      localStorage.setItem(key, value);
+      return { key, value };
+    } catch (e) {
+      return null;
+    }
+  },
+};
+
+// ---------- Static program data ----------
+
+const MUSCLE_COLORS = {
+  Chest: "#C4694F", Back: "#3B6FA0", Shoulders: "#D9A441", Biceps: "#5C8A5C",
+  Triceps: "#7A5C9E", Legs: "#B0563E", Glutes: "#8E6FB0", Hamstrings: "#4A7856",
+  Core: "#6B7280", Calves: "#3B6FA0", Forearms: "#5C8A5C",
+};
+
+function primaryMuscleGroup(text) {
+  const t = text.toLowerCase();
+  if (t.includes("chest")) return "Chest";
+  if (t.includes("lat") || t.includes("back") || t.includes("rhomboid") || t.includes("trap")) return "Back";
+  if (t.includes("delt") || t.includes("shoulder")) return "Shoulders";
+  if (t.includes("bicep")) return "Biceps";
+  if (t.includes("tricep")) return "Triceps";
+  if (t.includes("glute")) return "Glutes";
+  if (t.includes("hamstring") || t.includes("posterior chain")) return "Hamstrings";
+  if (t.includes("quad")) return "Legs";
+  if (t.includes("calf") || t.includes("calves")) return "Calves";
+  if (t.includes("core") || t.includes("ab")) return "Core";
+  if (t.includes("forearm")) return "Forearms";
+  return "Back";
+}
+
+const DAYS = [
+  { id: "day1", label: "Day 1", name: "Upper Body", focus: "Chest, Back, Shoulders, Arms", color: "#3B6FA0",
+    exercises: [
+      { name: "Bench Press", sets: 4, reps: "6–8", muscles: "Chest, Triceps, Front Delts" },
+      { name: "Pull-Ups / Lat Pulldown", sets: 4, reps: "8–10", muscles: "Lats, Biceps, Upper Back" },
+      { name: "Incline Dumbbell Press", sets: 3, reps: "8–10", muscles: "Upper Chest, Front Delts" },
+      { name: "Seated Cable Row", sets: 3, reps: "8–12", muscles: "Mid Back, Rhomboids" },
+      { name: "Dumbbell Shoulder Press", sets: 3, reps: "8–10", muscles: "Shoulders (Overall)" },
+      { name: "Lateral Raises", sets: 3, reps: "12–15", muscles: "Side Delts" },
+      { name: "Barbell / EZ Curl", sets: 3, reps: "10–12", muscles: "Biceps" },
+      { name: "Triceps Pushdown", sets: 3, reps: "10–12", muscles: "Triceps" },
+      { name: "Face Pulls", sets: 2, reps: "12–15", muscles: "Rear Delts, Upper Back" },
+      { name: "Hammer Curl (Optional)", sets: 2, reps: "10–12", muscles: "Biceps, Forearms" },
+    ]},
+  { id: "day2", label: "Day 2", name: "Lower Body", focus: "Legs, Glutes, Hamstrings, Core", color: "#4A7856",
+    exercises: [
+      { name: "Back Squat", sets: 4, reps: "6–10", muscles: "Quads, Glutes, Hamstrings" },
+      { name: "Romanian Deadlift", sets: 4, reps: "8–10", muscles: "Hamstrings, Glutes, Lower Back" },
+      { name: "Leg Press", sets: 3, reps: "10–12", muscles: "Quads, Glutes" },
+      { name: "Leg Curl", sets: 3, reps: "10–15", muscles: "Hamstrings" },
+      { name: "Walking Lunge", sets: 3, reps: "10–12", muscles: "Quads, Glutes" },
+      { name: "Standing Calf Raise", sets: 4, reps: "12–15", muscles: "Calves" },
+      { name: "Plank", sets: 3, reps: "30–60 sec", muscles: "Core (Abs, Obliques)" },
+      { name: "Hanging Leg Raise", sets: 3, reps: "10–15", muscles: "Lower Abs" },
+    ]},
+  { id: "day3", label: "Day 3", name: "Full Body", focus: "Total Body, Strength & Aesthetics", color: "#7A5C9E",
+    exercises: [
+      { name: "Deadlift", sets: 3, reps: "5–8", muscles: "Full Posterior Chain" },
+      { name: "Incline Dumbbell Press", sets: 3, reps: "8–10", muscles: "Upper Chest, Front Delts" },
+      { name: "Pull-Ups / Lat Pulldown", sets: 3, reps: "8–10", muscles: "Lats, Biceps, Upper Back" },
+      { name: "Dumbbell Bench Press", sets: 3, reps: "8–12", muscles: "Chest, Triceps, Front Delts" },
+      { name: "Bent Over Row", sets: 3, reps: "8–12", muscles: "Mid Back, Lats, Biceps" },
+      { name: "Lateral Raises", sets: 3, reps: "12–15", muscles: "Side Delts" },
+      { name: "Bulgarian Split Squat", sets: 3, reps: "8–12", muscles: "Quads, Glutes" },
+      { name: "Triceps Overhead Ext.", sets: 2, reps: "10–12", muscles: "Triceps" },
+      { name: "Barbell / EZ Curl", sets: 2, reps: "10–12", muscles: "Biceps" },
+      { name: "Cable Crunch", sets: 3, reps: "12–15", muscles: "Abs" },
+    ]},
+];
+
+const TRAINING_NOTES = [
+  "Rest 60–90 sec between sets (compounds), 45–60 sec (isolations)",
+  "Focus on progressive overload every week",
+  "Keep 1–2 reps in reserve on most sets",
+  "Warm up before lifting and stretch after",
+];
+
+function todayISO() {
+  const d = new Date();
+  const tz = d.getTimezoneOffset() * 60000;
+  return new Date(d - tz).toISOString().slice(0, 10);
+}
+
+function formatDateLabel(iso) {
+  const d = new Date(iso + "T00:00:00");
+  return d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+}
+
+function logKey(date, dayId) { return `log:${date}:${dayId}`; }
+
+const { Check, ChevronDown, ChevronUp, TrendingUp, Scale, Dumbbell, Calendar } = lucide;
+
+function IconWrap({ icon: Icon, size, color, strokeWidth }) {
+  const ref = React.useRef(null);
+  useEffect(() => {
+    if (ref.current) {
+      ref.current.innerHTML = "";
+      const svg = Icon.toSvg({ width: size, height: size, color, "stroke-width": strokeWidth || 2 });
+      ref.current.innerHTML = svg;
+    }
+  }, [Icon, size, color, strokeWidth]);
+  return <span ref={ref} style={{ display: "inline-flex", verticalAlign: "middle" }} />;
+}
+
+function App() {
+  const [activeDay, setActiveDay] = useState("day1");
+  const [date, setDate] = useState(todayISO());
+  const [log, setLog] = useState(null);
+  const [expanded, setExpanded] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [saveError, setSaveError] = useState(false);
+  const [view, setView] = useState("log");
+  const [bodyWeights, setBodyWeights] = useState({});
+  const [bwInput, setBwInput] = useState("");
+  const [historyDates, setHistoryDates] = useState([]);
+
+  const day = DAYS.find((d) => d.id === activeDay);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    (async () => {
+      try {
+        const result = await storage.get(logKey(date, activeDay));
+        if (!cancelled) setLog(result ? JSON.parse(result.value) : {});
+      } catch (e) {
+        if (!cancelled) setLog({});
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [date, activeDay]);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const result = await storage.get("bodyweight-log");
+        if (result) setBodyWeights(JSON.parse(result.value));
+      } catch (e) {}
+    })();
+  }, []);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const result = await storage.get("history-index");
+        if (result) setHistoryDates(JSON.parse(result.value));
+      } catch (e) {}
+    })();
+  }, []);
+
+  const persistLog = useCallback(async (newLog) => {
+    setLog(newLog);
+    try {
+      const res = await storage.set(logKey(date, activeDay), JSON.stringify(newLog));
+      if (!res) throw new Error("save failed");
+      setSaveError(false);
+      const exists = historyDates.some((h) => h.date === date && h.dayId === activeDay);
+      if (!exists) {
+        const newIndex = [...historyDates, { date, dayId: activeDay }];
+        setHistoryDates(newIndex);
+        await storage.set("history-index", JSON.stringify(newIndex));
+      }
+    } catch (e) {
+      setSaveError(true);
+    }
+  }, [date, activeDay, historyDates]);
+
+  const updateSet = (exIdx, setIdx, field, value) => {
+    const newLog = { ...log };
+    if (!newLog[exIdx]) newLog[exIdx] = {};
+    if (!newLog[exIdx][setIdx]) newLog[exIdx][setIdx] = { weight: "", reps: "", done: false };
+    newLog[exIdx][setIdx] = { ...newLog[exIdx][setIdx], [field]: value };
+    persistLog(newLog);
+  };
+
+  const toggleSetDone = (exIdx, setIdx) => {
+    const newLog = { ...log };
+    if (!newLog[exIdx]) newLog[exIdx] = {};
+    const current = newLog[exIdx][setIdx] || { weight: "", reps: "", done: false };
+    newLog[exIdx][setIdx] = { ...current, done: !current.done };
+    persistLog(newLog);
+  };
+
+  const saveBodyWeight = async () => {
+    const val = parseFloat(bwInput);
+    if (!val || val <= 0) return;
+    const newBw = { ...bodyWeights, [date]: val };
+    setBodyWeights(newBw);
+    setBwInput("");
+    try { await storage.set("bodyweight-log", JSON.stringify(newBw)); } catch (e) {}
+  };
+
+  const totalSetsInDay = day.exercises.reduce((sum, ex) => sum + ex.sets, 0);
+  const completedSets = useMemo(() => {
+    if (!log) return 0;
+    let count = 0;
+    Object.values(log).forEach((ex) => Object.values(ex).forEach((s) => { if (s.done) count++; }));
+    return count;
+  }, [log]);
+
+  const bwEntries = Object.entries(bodyWeights).sort(([a], [b]) => (a < b ? -1 : 1));
+
+  return (
+    <div style={styles.app}>
+      <header style={styles.header}>
+        <div style={styles.headerTop}>
+          <IconWrap icon={Dumbbell} size={22} color="#D9A441" strokeWidth={2.5} />
+          <h1 style={styles.title}>FOCUS &amp; FORM</h1>
+        </div>
+        <p style={styles.subtitle}>3-Day Upper / Lower / Full Body Split</p>
+      </header>
+
+      <nav style={styles.viewToggle}>
+        <button onClick={() => setView("log")} style={{ ...styles.viewBtn, ...(view === "log" ? styles.viewBtnActive : {}) }}>
+          <IconWrap icon={Calendar} size={15} color={view === "log" ? "#EDEAE3" : "#8A857A"} /> Log
+        </button>
+        <button onClick={() => setView("progress")} style={{ ...styles.viewBtn, ...(view === "progress" ? styles.viewBtnActive : {}) }}>
+          <IconWrap icon={TrendingUp} size={15} color={view === "progress" ? "#EDEAE3" : "#8A857A"} /> Progress
+        </button>
+      </nav>
+
+      {view === "log" && (
+        <React.Fragment>
+          <div style={styles.dateRow}>
+            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={styles.dateInput} />
+            <span style={styles.dateLabel}>{formatDateLabel(date)}</span>
+          </div>
+
+          <div style={styles.tabs}>
+            {DAYS.map((d) => (
+              <button key={d.id} onClick={() => { setActiveDay(d.id); setExpanded(0); }}
+                style={{ ...styles.tab, borderColor: d.color,
+                  ...(activeDay === d.id ? { background: d.color, color: "#1C1B1A" } : { background: "transparent", color: d.color }) }}>
+                <span style={styles.tabLabel}>{d.label}</span>
+                <span style={styles.tabName}>{d.name}</span>
+              </button>
+            ))}
+          </div>
+
+          <div style={{ ...styles.dayHeader, borderColor: day.color }}>
+            <div><div style={{ ...styles.dayFocus, color: day.color }}>{day.focus}</div></div>
+            <div style={styles.progressBadge}>
+              <div style={styles.progressText}>{completedSets}/{totalSetsInDay} sets</div>
+              <div style={styles.progressBarTrack}>
+                <div style={{ ...styles.progressBarFill, width: `${totalSetsInDay ? (completedSets / totalSetsInDay) * 100 : 0}%`, background: day.color }} />
+              </div>
+            </div>
+          </div>
+
+          {saveError && <div style={styles.errorBanner}>Couldn't save — your browser storage may be full or blocked.</div>}
+
+          {loading ? (
+            <div style={styles.loadingText}>Loading…</div>
+          ) : (
+            <div style={styles.exerciseList}>
+              {day.exercises.map((ex, exIdx) => {
+                const group = primaryMuscleGroup(ex.muscles);
+                const barColor = MUSCLE_COLORS[group] || "#6B7280";
+                const isOpen = expanded === exIdx;
+                const exLog = (log && log[exIdx]) || {};
+                const doneCount = Object.values(exLog).filter((s) => s.done).length;
+
+                return (
+                  <div key={exIdx} style={{ ...styles.exerciseCard, borderLeftColor: barColor }}>
+                    <button style={styles.exerciseHeader} onClick={() => setExpanded(isOpen ? -1 : exIdx)}>
+                      <div style={{ flex: 1, textAlign: "left" }}>
+                        <div style={styles.exerciseName}>{exIdx + 1}. {ex.name}</div>
+                        <div style={styles.exerciseMeta}>{ex.sets} × {ex.reps} &nbsp;·&nbsp; {ex.muscles}</div>
+                      </div>
+                      <div style={styles.exerciseRight}>
+                        <span style={{ ...styles.setBadge, color: barColor, borderColor: barColor }}>{doneCount}/{ex.sets}</span>
+                        <IconWrap icon={isOpen ? ChevronUp : ChevronDown} size={18} color="#8A857A" />
+                      </div>
+                    </button>
+
+                    {isOpen && (
+                      <div style={styles.setsPanel}>
+                        <div style={styles.setsHeaderRow}>
+                          <span>Set</span><span>Weight (lb)</span><span>Reps</span><span>Done</span>
+                        </div>
+                        {Array.from({ length: ex.sets }).map((_, setIdx) => {
+                          const s = exLog[setIdx] || { weight: "", reps: "", done: false };
+                          return (
+                            <div key={setIdx} style={styles.setRow}>
+                              <span style={styles.setNum}>{setIdx + 1}</span>
+                              <input type="number" inputMode="decimal" placeholder="—" value={s.weight}
+                                onChange={(e) => updateSet(exIdx, setIdx, "weight", e.target.value)} style={styles.setInput} />
+                              <input type="number" inputMode="numeric" placeholder={ex.reps} value={s.reps}
+                                onChange={(e) => updateSet(exIdx, setIdx, "reps", e.target.value)} style={styles.setInput} />
+                              <button onClick={() => toggleSetDone(exIdx, setIdx)}
+                                style={{ ...styles.checkBtn, background: s.done ? barColor : "transparent", borderColor: barColor }}
+                                aria-label={s.done ? "Mark set incomplete" : "Mark set complete"}>
+                                {s.done && <IconWrap icon={Check} size={14} color="#1C1B1A" strokeWidth={3} />}
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          <div style={styles.notesCard}>
+            <div style={styles.notesTitle}>Training Notes</div>
+            <ul style={styles.notesList}>
+              {TRAINING_NOTES.map((n, i) => <li key={i} style={styles.notesItem}>{n}</li>)}
+            </ul>
+          </div>
+        </React.Fragment>
+      )}
+
+      {view === "progress" && (
+        <div style={styles.progressView}>
+          <div style={styles.bwCard}>
+            <div style={styles.bwCardHeader}><IconWrap icon={Scale} size={16} color="#D9A441" /><span style={styles.bwCardTitle}>Body Weight</span></div>
+            <div style={styles.bwInputRow}>
+              <input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={styles.dateInput} />
+              <input type="number" inputMode="decimal" placeholder="lb" value={bwInput} onChange={(e) => setBwInput(e.target.value)} style={styles.bwInput} />
+              <button onClick={saveBodyWeight} style={styles.bwSaveBtn}>Log</button>
+            </div>
+            {bwEntries.length === 0 ? (
+              <div style={styles.emptyText}>No body weight entries yet. Log your first one above.</div>
+            ) : <BodyWeightChart entries={bwEntries} />}
+          </div>
+
+          <div style={styles.historyCard}>
+            <div style={styles.bwCardHeader}><IconWrap icon={Calendar} size={16} color="#D9A441" /><span style={styles.bwCardTitle}>Workout History</span></div>
+            {historyDates.length === 0 ? (
+              <div style={styles.emptyText}>No workouts logged yet. Complete a set to start your history.</div>
+            ) : (
+              <div style={styles.historyList}>
+                {[...historyDates].sort((a, b) => (a.date < b.date ? 1 : -1)).slice(0, 20).map((h, i) => {
+                  const d = DAYS.find((dd) => dd.id === h.dayId);
+                  return (
+                    <button key={i} onClick={() => { setDate(h.date); setActiveDay(h.dayId); setView("log"); }}
+                      style={{ ...styles.historyRow, borderLeftColor: d.color }}>
+                      <span style={styles.historyDate}>{formatDateLabel(h.date)}</span>
+                      <span style={{ ...styles.historyDay, color: d.color }}>{d.name}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function BodyWeightChart({ entries }) {
+  const weights = entries.map(([, w]) => w);
+  const min = Math.min(...weights);
+  const max = Math.max(...weights);
+  const range = max - min || 1;
+  const width = 300, height = 100, padding = 10;
+
+  const points = entries.map(([, w], i) => {
+    const x = entries.length > 1 ? (i / (entries.length - 1)) * (width - padding * 2) + padding : width / 2;
+    const y = height - padding - ((w - min) / range) * (height - padding * 2);
+    return `${x},${y}`;
+  });
+
+  const first = weights[0];
+  const last = weights[weights.length - 1];
+  const delta = last - first;
+
+  return (
+    <div>
+      <svg width="100%" viewBox={`0 0 ${width} ${height}`} style={{ marginTop: 12 }}>
+        <polyline points={points.join(" ")} fill="none" stroke="#D9A441" strokeWidth="2" />
+        {entries.map(([, w], i) => {
+          const [x, y] = points[i].split(",");
+          return <circle key={i} cx={x} cy={y} r="3" fill="#D9A441" />;
+        })}
+      </svg>
+      <div style={styles.bwSummary}>
+        <span>{first} → {last} lb</span>
+        <span style={{ color: delta <= 0 ? "#4A7856" : "#C4694F" }}>{delta > 0 ? "+" : ""}{delta.toFixed(1)} lb</span>
+      </div>
+    </div>
+  );
+}
+
+const styles = {
+  app: { fontFamily: "'Inter', -apple-system, sans-serif", background: "#1C1B1A", color: "#EDEAE3", minHeight: "100vh", maxWidth: 480, margin: "0 auto", padding: "20px 14px 60px", boxSizing: "border-box" },
+  header: { marginBottom: 16 },
+  headerTop: { display: "flex", alignItems: "center", gap: 8 },
+  title: { fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 26, letterSpacing: "0.06em", margin: 0, color: "#EDEAE3" },
+  subtitle: { margin: "2px 0 0 30px", fontSize: 12.5, color: "#8A857A" },
+  viewToggle: { display: "flex", gap: 8, marginBottom: 16, background: "#252422", padding: 4, borderRadius: 10 },
+  viewBtn: { flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "8px 0", borderRadius: 7, border: "none", background: "transparent", color: "#8A857A", fontWeight: 600, fontSize: 13, cursor: "pointer" },
+  viewBtnActive: { background: "#3A3835", color: "#EDEAE3" },
+  dateRow: { display: "flex", alignItems: "center", gap: 10, marginBottom: 14 },
+  dateInput: { background: "#252422", border: "1px solid #3A3835", borderRadius: 7, color: "#EDEAE3", padding: "6px 8px", fontFamily: "'Inter', sans-serif", fontSize: 13 },
+  dateLabel: { fontSize: 13, color: "#8A857A", fontWeight: 500 },
+  tabs: { display: "flex", gap: 6, marginBottom: 14 },
+  tab: { flex: 1, borderRadius: 9, border: "2px solid", padding: "8px 4px", display: "flex", flexDirection: "column", alignItems: "center", cursor: "pointer" },
+  tabLabel: { fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 15, letterSpacing: "0.04em" },
+  tabName: { fontSize: 10.5, fontWeight: 500, opacity: 0.9 },
+  dayHeader: { borderLeft: "3px solid", paddingLeft: 10, marginBottom: 14, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 },
+  dayFocus: { fontSize: 12.5, fontWeight: 600 },
+  progressBadge: { minWidth: 110, textAlign: "right" },
+  progressText: { fontSize: 11.5, color: "#8A857A", marginBottom: 4 },
+  progressBarTrack: { height: 4, background: "#3A3835", borderRadius: 2, overflow: "hidden" },
+  progressBarFill: { height: "100%", borderRadius: 2, transition: "width 0.2s" },
+  errorBanner: { background: "#3A2622", color: "#E8A398", fontSize: 12.5, padding: "8px 10px", borderRadius: 7, marginBottom: 12 },
+  loadingText: { color: "#8A857A", fontSize: 13, padding: "20px 0", textAlign: "center" },
+  exerciseList: { display: "flex", flexDirection: "column", gap: 8, marginBottom: 20 },
+  exerciseCard: { background: "#252422", borderLeft: "4px solid", borderRadius: 8, overflow: "hidden" },
+  exerciseHeader: { width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", background: "transparent", border: "none", padding: "11px 12px", cursor: "pointer", color: "inherit" },
+  exerciseName: { fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 16.5, color: "#EDEAE3" },
+  exerciseMeta: { fontSize: 11.5, color: "#8A857A", marginTop: 2 },
+  exerciseRight: { display: "flex", alignItems: "center", gap: 8 },
+  setBadge: { fontSize: 11, fontWeight: 700, border: "1.5px solid", borderRadius: 5, padding: "2px 6px" },
+  setsPanel: { padding: "0 12px 12px", display: "flex", flexDirection: "column", gap: 6 },
+  setsHeaderRow: { display: "grid", gridTemplateColumns: "28px 1fr 1fr 36px", gap: 8, fontSize: 10.5, color: "#6B675F", textTransform: "uppercase", letterSpacing: "0.04em", padding: "4px 0" },
+  setRow: { display: "grid", gridTemplateColumns: "28px 1fr 1fr 36px", gap: 8, alignItems: "center" },
+  setNum: { fontSize: 13, color: "#8A857A", fontWeight: 600 },
+  setInput: { background: "#1C1B1A", border: "1px solid #3A3835", borderRadius: 6, color: "#EDEAE3", padding: "7px 8px", fontSize: 13, fontFamily: "'Inter', sans-serif", width: "100%", boxSizing: "border-box" },
+  checkBtn: { width: 30, height: 30, borderRadius: 6, border: "1.5px solid", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" },
+  notesCard: { background: "#252422", borderRadius: 8, padding: "12px 14px" },
+  notesTitle: { fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 15, marginBottom: 6, letterSpacing: "0.03em" },
+  notesList: { margin: 0, paddingLeft: 18, display: "flex", flexDirection: "column", gap: 4 },
+  notesItem: { fontSize: 12.5, color: "#B5B0A6" },
+  progressView: { display: "flex", flexDirection: "column", gap: 14 },
+  bwCard: { background: "#252422", borderRadius: 10, padding: 14 },
+  bwCardHeader: { display: "flex", alignItems: "center", gap: 7, marginBottom: 12 },
+  bwCardTitle: { fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 16 },
+  bwInputRow: { display: "flex", gap: 8 },
+  bwInput: { background: "#1C1B1A", border: "1px solid #3A3835", borderRadius: 6, color: "#EDEAE3", padding: "7px 8px", fontSize: 13, width: 70, fontFamily: "'Inter', sans-serif" },
+  bwSaveBtn: { background: "#D9A441", color: "#1C1B1A", border: "none", borderRadius: 6, padding: "7px 14px", fontWeight: 700, fontSize: 13, cursor: "pointer" },
+  bwSummary: { display: "flex", justifyContent: "space-between", fontSize: 12.5, color: "#8A857A", marginTop: 6 },
+  emptyText: { fontSize: 12.5, color: "#6B675F", marginTop: 10, lineHeight: 1.5 },
+  historyCard: { background: "#252422", borderRadius: 10, padding: 14 },
+  historyList: { display: "flex", flexDirection: "column", gap: 6 },
+  historyRow: { display: "flex", justifyContent: "space-between", alignItems: "center", background: "#1C1B1A", border: "none", borderLeft: "3px solid", borderRadius: 6, padding: "8px 10px", cursor: "pointer", color: "inherit" },
+  historyDate: { fontSize: 12.5, color: "#B5B0A6" },
+  historyDay: { fontSize: 12, fontWeight: 700 },
+};
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('sw.js').catch(() => {});
+    });
+  }
+</script>
+</body>
+</html>
