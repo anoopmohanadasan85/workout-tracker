@@ -137,6 +137,12 @@ function formatDateLabel(iso) {
 
 function logKey(date, dayId) { return `log:${date}:${dayId}`; }
 
+const DEFAULT_REST_SEC = 90;
+function formatClock(sec) {
+  const m = Math.floor(sec / 60);
+  return `${m}:${String(sec % 60).padStart(2, "0")}`;
+}
+
 // Small hand-drawn icon set — no external dependency, so nothing to fail to load.
 function svgBase(size, color, strokeWidth, children) {
   return (
@@ -188,6 +194,11 @@ const Calendar = ({ size = 16, color = "currentColor", strokeWidth = 2 }) =>
     <line x1="3" y1="10" x2="21" y2="10" />
   </React.Fragment>);
 
+const Timer = ({ size = 16, color = "currentColor", strokeWidth = 2 }) =>
+  svgBase(size, color, strokeWidth, <React.Fragment>
+    <circle cx="12" cy="14" r="8" /><path d="M12 10v4l2 2" /><path d="M10 2h4" />
+  </React.Fragment>);
+
 function IconWrap({ icon: Icon, size, color, strokeWidth }) {
   return <Icon size={size} color={color} strokeWidth={strokeWidth} />;
 }
@@ -203,6 +214,10 @@ function App() {
   const [bodyWeights, setBodyWeights] = useState({});
   const [bwInput, setBwInput] = useState("");
   const [historyDates, setHistoryDates] = useState([]);
+  // Active rest countdown: { date, dayId, exIdx, setIdx, endAt, alerted } — only one at a time.
+  const [rest, setRest] = useState(null);
+  const [now, setNow] = useState(Date.now());
+  const [restDurations, setRestDurations] = useState({});
 
   const day = DAYS.find((d) => d.id === activeDay);
 
@@ -221,6 +236,29 @@ function App() {
     })();
     return () => { cancelled = true; };
   }, [date, activeDay]);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("rest-durations");
+      if (raw) setRestDurations(JSON.parse(raw));
+    } catch (e) {}
+  }, []);
+
+  // Tick while a rest is running; remaining time is derived from endAt so it stays
+  // correct even if the phone locks or the tab is backgrounded.
+  useEffect(() => {
+    if (!rest) return;
+    setNow(Date.now());
+    const id = setInterval(() => setNow(Date.now()), 250);
+    return () => clearInterval(id);
+  }, [rest]);
+
+  useEffect(() => {
+    if (rest && !rest.alerted && now >= rest.endAt) {
+      try { if (navigator.vibrate) navigator.vibrate([200, 100, 200]); } catch (e) {}
+      setRest({ ...rest, alerted: true });
+    }
+  }, [now, rest]);
 
   useEffect(() => {
     (async () => {
@@ -271,7 +309,29 @@ function App() {
     const current = newLog[exIdx][setIdx] || { weight: "", reps: "", done: false };
     newLog[exIdx][setIdx] = { ...current, done: !current.done };
     persistLog(newLog);
+    if (!current.done) {
+      const sec = restDurations[day.exercises[exIdx].name] || DEFAULT_REST_SEC;
+      setRest({ date, dayId: activeDay, exIdx, setIdx, endAt: Date.now() + sec * 1000, alerted: false });
+    } else if (rest && rest.exIdx === exIdx && rest.setIdx === setIdx) {
+      setRest(null);
+    }
   };
+
+  // Shift the running rest by delta seconds and remember the new length for this exercise.
+  const adjustRest = (delta) => {
+    if (!rest) return;
+    const name = day.exercises[rest.exIdx].name;
+    const base = restDurations[name] || DEFAULT_REST_SEC;
+    const nextLen = Math.max(15, base + delta);
+    const newDurations = { ...restDurations, [name]: nextLen };
+    setRestDurations(newDurations);
+    try { localStorage.setItem("rest-durations", JSON.stringify(newDurations)); } catch (e) {}
+    const endAt = Math.max(Date.now(), rest.endAt + (nextLen - base) * 1000);
+    setRest({ ...rest, endAt, alerted: endAt <= Date.now() });
+  };
+
+  const restHere = rest && rest.date === date && rest.dayId === activeDay ? rest : null;
+  const restRemaining = restHere ? Math.max(0, Math.ceil((restHere.endAt - now) / 1000)) : 0;
 
   const saveBodyWeight = async () => {
     const val = parseFloat(bwInput);
@@ -351,6 +411,8 @@ function App() {
                 const isOpen = expanded === exIdx;
                 const exLog = (log && log[exIdx]) || {};
                 const doneCount = Object.values(exLog).filter((s) => s.done).length;
+                const exRest = restHere && restHere.exIdx === exIdx ? restHere : null;
+                const restLen = restDurations[ex.name] || DEFAULT_REST_SEC;
 
                 return (
                   <div key={exIdx} style={{ ...styles.exerciseCard, borderLeftColor: barColor }}>
@@ -360,6 +422,12 @@ function App() {
                         <div style={styles.exerciseMeta}>{ex.sets} × {ex.reps} &nbsp;·&nbsp; {ex.muscles}</div>
                       </div>
                       <div style={styles.exerciseRight}>
+                        {exRest && !isOpen && (
+                          <span style={{ ...styles.restMini, color: restRemaining === 0 ? "#D9A441" : "#B5B0A6" }}>
+                            <IconWrap icon={Timer} size={13} color={restRemaining === 0 ? "#D9A441" : "#8A857A"} />
+                            {restRemaining === 0 ? "Go" : formatClock(restRemaining)}
+                          </span>
+                        )}
                         <span style={{ ...styles.setBadge, color: barColor, borderColor: barColor }}>{doneCount}/{ex.sets}</span>
                         <IconWrap icon={isOpen ? ChevronUp : ChevronDown} size={18} color="#8A857A" />
                       </div>
@@ -372,11 +440,14 @@ function App() {
                         </div>
                         {Array.from({ length: ex.sets }).map((_, setIdx) => {
                           const s = exLog[setIdx] || { weight: "", reps: "", done: false };
+                          const showRest = exRest && exRest.setIdx === setIdx;
+                          const restOver = showRest && restRemaining === 0;
                           return (
-                            <div key={setIdx} style={styles.setRow}>
+                            <React.Fragment key={setIdx}>
+                            <div style={styles.setRow}>
                               <span style={styles.setNum}>{setIdx + 1}</span>
-                              <input type="number" inputMode="decimal" placeholder="—" value={s.weight}
-                                onChange={(e) => updateSet(exIdx, setIdx, "weight", e.target.value)} style={styles.setInput} />
+                              <input type="number" inputMode="decimal" min="0" value={s.weight}
+                                onChange={(e) => updateSet(exIdx, setIdx, "weight", e.target.value.replace(/-/g, ""))} style={styles.setInput} />
                               <input type="number" inputMode="numeric" placeholder={ex.reps} value={s.reps}
                                 onChange={(e) => updateSet(exIdx, setIdx, "reps", e.target.value)} style={styles.setInput} />
                               <button onClick={() => toggleSetDone(exIdx, setIdx)}
@@ -385,6 +456,26 @@ function App() {
                                 {s.done && <IconWrap icon={Check} size={14} color="#1C1B1A" strokeWidth={3} />}
                               </button>
                             </div>
+                            {showRest && (
+                              <div style={{ ...styles.restRow, borderColor: restOver ? "#D9A441" : "#3A3835" }} role="timer" aria-live="polite">
+                                <div style={styles.restTop}>
+                                  <IconWrap icon={Timer} size={15} color={restOver ? "#D9A441" : barColor} />
+                                  <span style={{ ...styles.restClock, color: restOver ? "#D9A441" : "#EDEAE3" }}>
+                                    {restOver ? "REST OVER — GO" : formatClock(restRemaining)}
+                                  </span>
+                                  <div style={styles.restBtns}>
+                                    <button style={styles.restBtn} onClick={() => adjustRest(-15)} aria-label="Shorten rest by 15 seconds">−15</button>
+                                    <button style={styles.restBtn} onClick={() => adjustRest(15)} aria-label="Lengthen rest by 15 seconds">+15</button>
+                                    <button style={styles.restBtn} onClick={() => setRest(null)}>{restOver ? "Done" : "Skip"}</button>
+                                  </div>
+                                </div>
+                                <div style={styles.progressBarTrack}>
+                                  <div style={{ ...styles.progressBarFill, transition: "width 0.25s linear",
+                                    width: `${Math.min(100, (restRemaining / restLen) * 100)}%`, background: restOver ? "#D9A441" : barColor }} />
+                                </div>
+                              </div>
+                            )}
+                            </React.Fragment>
                           );
                         })}
                       </div>
@@ -514,6 +605,12 @@ const styles = {
   setNum: { fontSize: 13, color: "#8A857A", fontWeight: 600 },
   setInput: { background: "#1C1B1A", border: "1px solid #3A3835", borderRadius: 6, color: "#EDEAE3", padding: "7px 8px", fontSize: 13, fontFamily: "'Inter', sans-serif", width: "100%", boxSizing: "border-box" },
   checkBtn: { width: 30, height: 30, borderRadius: 6, border: "1.5px solid", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" },
+  restRow: { background: "#1C1B1A", border: "1px solid", borderRadius: 7, padding: "8px 10px", display: "flex", flexDirection: "column", gap: 7 },
+  restTop: { display: "flex", alignItems: "center", gap: 8 },
+  restClock: { fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 20, letterSpacing: "0.03em", flex: 1, fontVariantNumeric: "tabular-nums" },
+  restBtns: { display: "flex", gap: 5 },
+  restBtn: { background: "#252422", border: "1px solid #3A3835", borderRadius: 6, color: "#EDEAE3", fontSize: 12, fontWeight: 600, padding: "5px 8px", cursor: "pointer" },
+  restMini: { display: "inline-flex", alignItems: "center", gap: 3, fontSize: 12, fontWeight: 600, fontVariantNumeric: "tabular-nums" },
   notesCard: { background: "#252422", borderRadius: 8, padding: "12px 14px" },
   notesTitle: { fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 15, marginBottom: 6, letterSpacing: "0.03em" },
   notesList: { margin: 0, paddingLeft: 18, display: "flex", flexDirection: "column", gap: 4 },
