@@ -29,7 +29,6 @@
 <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-<script src="https://unpkg.com/lucide@0.263.1/dist/umd/lucide.js"></script>
 </head>
 <body>
 <div id="root"></div>
@@ -138,27 +137,59 @@ function formatDateLabel(iso) {
 
 function logKey(date, dayId) { return `log:${date}:${dayId}`; }
 
-const { Check, ChevronDown, ChevronUp, TrendingUp, Scale, Dumbbell, Calendar } = lucide;
+// Small hand-drawn icon set — no external dependency, so nothing to fail to load.
+function svgBase(size, color, strokeWidth, children) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color}
+      strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round"
+      style={{ display: "inline-block", verticalAlign: "middle" }}>
+      {children}
+    </svg>
+  );
+}
+
+const Check = ({ size = 16, color = "currentColor", strokeWidth = 2 }) =>
+  svgBase(size, color, strokeWidth, <polyline points="20 6 9 17 4 12" />);
+
+const ChevronDown = ({ size = 16, color = "currentColor", strokeWidth = 2 }) =>
+  svgBase(size, color, strokeWidth, <polyline points="6 9 12 15 18 9" />);
+
+const ChevronUp = ({ size = 16, color = "currentColor", strokeWidth = 2 }) =>
+  svgBase(size, color, strokeWidth, <polyline points="18 15 12 9 6 15" />);
+
+const TrendingUp = ({ size = 16, color = "currentColor", strokeWidth = 2 }) =>
+  svgBase(size, color, strokeWidth, <React.Fragment>
+    <polyline points="23 6 13.5 15.5 8.5 10.5 1 18" />
+    <polyline points="17 6 23 6 23 12" />
+  </React.Fragment>);
+
+const Scale = ({ size = 16, color = "currentColor", strokeWidth = 2 }) =>
+  svgBase(size, color, strokeWidth, <React.Fragment>
+    <line x1="12" y1="3" x2="12" y2="21" />
+    <line x1="4" y1="7" x2="20" y2="7" />
+    <path d="M4 7l3 7a3 3 0 0 0 6 0L4 7" />
+    <path d="M20 7l-3 7a3 3 0 0 1-6 0L20 7" />
+  </React.Fragment>);
+
+const Dumbbell = ({ size = 16, color = "currentColor", strokeWidth = 2 }) =>
+  svgBase(size, color, strokeWidth, <React.Fragment>
+    <rect x="2" y="9" width="3" height="6" rx="1" />
+    <rect x="19" y="9" width="3" height="6" rx="1" />
+    <rect x="5" y="7" width="3" height="10" rx="1" />
+    <rect x="16" y="7" width="3" height="10" rx="1" />
+    <line x1="8" y1="12" x2="16" y2="12" />
+  </React.Fragment>);
+
+const Calendar = ({ size = 16, color = "currentColor", strokeWidth = 2 }) =>
+  svgBase(size, color, strokeWidth, <React.Fragment>
+    <rect x="3" y="4" width="18" height="18" rx="2" />
+    <line x1="16" y1="2" x2="16" y2="6" />
+    <line x1="8" y1="2" x2="8" y2="6" />
+    <line x1="3" y1="10" x2="21" y2="10" />
+  </React.Fragment>);
 
 function IconWrap({ icon: Icon, size, color, strokeWidth }) {
-  const ref = React.useRef(null);
-  useEffect(() => {
-    if (ref.current) {
-      ref.current.innerHTML = "";
-      try {
-        const svgEl = lucide.createElement(Icon, {
-          width: size,
-          height: size,
-          color: color,
-          "stroke-width": strokeWidth || 2,
-        });
-        ref.current.appendChild(svgEl);
-      } catch (e) {
-        // fail silently if an icon mismatches; layout still works without it
-      }
-    }
-  }, [Icon, size, color, strokeWidth]);
-  return <span ref={ref} style={{ display: "inline-flex", verticalAlign: "middle" }} />;
+  return <Icon size={size} color={color} strokeWidth={strokeWidth} />;
 }
 
 function App() {
