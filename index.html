@@ -61,6 +61,14 @@ const MUSCLE_COLORS = {
   Core: "#6B7280", Calves: "#3B6FA0", Forearms: "#5C8A5C",
 };
 
+// Legend entries grouped by color, so muscles sharing a color (e.g. Back & Calves) show as one swatch.
+const MUSCLE_LEGEND = Object.entries(MUSCLE_COLORS).reduce((acc, [muscle, color]) => {
+  const existing = acc.find((e) => e.color === color);
+  if (existing) existing.muscles.push(muscle);
+  else acc.push({ color, muscles: [muscle] });
+  return acc;
+}, []);
+
 function primaryMuscleGroup(text) {
   const t = text.toLowerCase();
   if (t.includes("chest")) return "Chest";
@@ -486,6 +494,18 @@ function App() {
             </div>
           )}
 
+          <div style={{ ...styles.notesCard, marginBottom: 12 }}>
+            <div style={styles.notesTitle}>Muscle Color Key</div>
+            <div style={styles.legendGrid}>
+              {MUSCLE_LEGEND.map((l) => (
+                <div key={l.color} style={styles.legendItem}>
+                  <span style={{ ...styles.legendSwatch, background: l.color }} />
+                  <span>{l.muscles.join(" · ")}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
           <div style={styles.notesCard}>
             <div style={styles.notesTitle}>Training Notes</div>
             <ul style={styles.notesList}>
@@ -615,6 +635,9 @@ const styles = {
   notesTitle: { fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 15, marginBottom: 6, letterSpacing: "0.03em" },
   notesList: { margin: 0, paddingLeft: 18, display: "flex", flexDirection: "column", gap: 4 },
   notesItem: { fontSize: 12.5, color: "#B5B0A6" },
+  legendGrid: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "7px 12px" },
+  legendItem: { display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, color: "#B5B0A6" },
+  legendSwatch: { width: 4, height: 16, borderRadius: 2, flexShrink: 0 },
   progressView: { display: "flex", flexDirection: "column", gap: 14 },
   bwCard: { background: "#252422", borderRadius: 10, padding: 14 },
   bwCardHeader: { display: "flex", alignItems: "center", gap: 7, marginBottom: 12 },
